@@ -1,19 +1,25 @@
 ---
-- name: Check if k3s server is already installed
+- name: Check if k3s server unit exists
   ansible.builtin.stat:
-    path: /usr/local/bin/k3s
-  register: k3s_bin
+    path: /etc/systemd/system/k3s.service
+  register: k3s_unit
 
-- name: Install k3s server (cluster init)
+- name: Detect disallowed node-role label in k3s unit
+  ansible.builtin.command: grep -F "node-role.kubernetes.io/worker" /etc/systemd/system/k3s.service
+  register: k3s_bad_label
+  changed_when: false
+  failed_when: false
+  when: k3s_unit.stat.exists
+  become: "{{ k3s_become }}"
+
+- name: Install or repair k3s server (cluster init)
   ansible.builtin.shell: |
     curl -sfL https://get.k3s.io | \
       {% if k3s_version | length > 0 %}INSTALL_K3S_VERSION="{{ k3s_version }}" {% endif %}sh -s - server \
       --cluster-init \
       {{ k3s_server_args }}
-  args:
-    creates: /usr/local/bin/k3s
   become: "{{ k3s_become }}"
-  when: not k3s_bin.stat.exists
+  when: not k3s_unit.stat.exists or (k3s_bad_label.rc | default(1)) == 0
 
 - name: Ensure k3s service is enabled and running
   ansible.builtin.systemd:

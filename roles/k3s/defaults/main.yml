@@ -7,11 +7,11 @@ k3s_cgroup_cmdline_params:
   - cgroup_memory=1
   - cgroup_enable=memory
 
-# Single control-plane per cluster (red). Remains schedulable as a worker —
-# do not add NoSchedule/NoExecute control-plane taints.
+# Single control-plane per cluster (red). Remains schedulable as a worker by
+# default — do not add NoSchedule/NoExecute control-plane taints.
+# Do not set node-role.kubernetes.io/* via --node-label; kubelet rejects it.
 k3s_server_args: >-
   --disable traefik
-  --node-label node-role.kubernetes.io/worker=true
 
 k3s_agent_args: ""
 k3s_kubeconfig_local_path: "{{ playbook_dir }}/../kubeconfigs"
