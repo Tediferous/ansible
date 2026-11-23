@@ -1,0 +1,46 @@
+---
+- name: Bootstrap k3s servers
+  hosts: k3s_servers
+  serial: 1
+  gather_facts: true
+  roles:
+    - role: k3s
+
+- name: Join k3s agents
+  hosts: k3s_agents
+  gather_facts: true
+  roles:
+    - role: k3s
+
+- name: Verify cluster nodes
+  hosts: k3s_servers
+  gather_facts: false
+  tasks:
+    - name: Resolve cluster name
+      ansible.builtin.set_fact:
+        k3s_cluster_group: "{{ (group_names | select('match', '^(zordon|gosei)$') | list)[0] }}"
+
+    - name: Skip non-init servers
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != groups[k3s_cluster_group ~ '_servers'][0]
+
+    - name: Count expected nodes
+      ansible.builtin.set_fact:
+        k3s_expected_nodes: "{{ groups[k3s_cluster_group] | length }}"
+
+    - name: Wait for all expected nodes Ready
+      ansible.builtin.command: kubectl get nodes --no-headers
+      register: k3s_nodes
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: >-
+        (k3s_nodes.stdout_lines | length) >= (k3s_expected_nodes | int)
+        and
+        (k3s_nodes.stdout_lines | select('search', '\\s+Ready\\s+') | list | length) >= (k3s_expected_nodes | int)
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Show cluster nodes
+      ansible.builtin.debug:
+        msg: "{{ k3s_nodes.stdout_lines }}"

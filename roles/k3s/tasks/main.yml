@@ -1,0 +1,40 @@
+---
+- name: Resolve cluster peers from parent group
+  ansible.builtin.set_fact:
+    k3s_cluster_group: "{{ (group_names | select('match', '^(zordon|gosei)$') | list)[0] }}"
+
+- name: Set first server as API endpoint for this cluster
+  ansible.builtin.set_fact:
+    k3s_api_host: "{{ hostvars[groups[k3s_cluster_group ~ '_servers'][0]].ansible_host }}"
+    k3s_is_init_server: "{{ inventory_hostname == groups[k3s_cluster_group ~ '_servers'][0] }}"
+
+- name: Install k3s prerequisites
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: "{{ k3s_become }}"
+
+- name: Install k3s server (init)
+  ansible.builtin.include_tasks: server_init.yml
+  when:
+    - inventory_hostname in groups['k3s_servers']
+    - k3s_is_init_server | bool
+
+- name: Fetch join token from init server
+  ansible.builtin.include_tasks: token.yml
+  when: inventory_hostname in groups['k3s_agents'] or
+        (inventory_hostname in groups['k3s_servers'] and not (k3s_is_init_server | bool))
+
+- name: Join additional k3s servers
+  ansible.builtin.include_tasks: server_join.yml
+  when:
+    - inventory_hostname in groups['k3s_servers']
+    - not (k3s_is_init_server | bool)
+
+- name: Install k3s agent
+  ansible.builtin.include_tasks: agent.yml
+  when: inventory_hostname in groups['k3s_agents']

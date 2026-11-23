@@ -1,0 +1,13 @@
+---
+k3s_version: ""  # empty = latest stable
+k3s_become: true
+
+# Single control-plane per cluster (red). Remains schedulable as a worker —
+# do not add NoSchedule/NoExecute control-plane taints.
+k3s_server_args: >-
+  --disable traefik
+  --node-label node-role.kubernetes.io/worker=true
+
+k3s_agent_args: ""
+k3s_kubeconfig_local_path: "{{ playbook_dir }}/../kubeconfigs"
+k3s_fetch_kubeconfig: true

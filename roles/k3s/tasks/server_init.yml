@@ -1,0 +1,76 @@
+---
+- name: Check if k3s server is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_bin
+
+- name: Install k3s server (cluster init)
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | \
+      {% if k3s_version | length > 0 %}INSTALL_K3S_VERSION="{{ k3s_version }}" {% endif %}sh -s - server \
+      --cluster-init \
+      {{ k3s_server_args }}
+  args:
+    creates: /usr/local/bin/k3s
+  become: "{{ k3s_become }}"
+  when: not k3s_bin.stat.exists
+
+- name: Ensure k3s service is enabled and running
+  ansible.builtin.systemd:
+    name: k3s
+    enabled: true
+    state: started
+  become: "{{ k3s_become }}"
+
+- name: Wait for node token
+  ansible.builtin.wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+    timeout: 120
+  become: "{{ k3s_become }}"
+
+- name: Wait for kubeconfig
+  ansible.builtin.wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    timeout: 120
+  become: "{{ k3s_become }}"
+
+- name: Read node token
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_slurp
+  become: "{{ k3s_become }}"
+
+- name: Store token on init server facts
+  ansible.builtin.set_fact:
+    k3s_token: "{{ k3s_token_slurp.content | b64decode | trim }}"
+
+- name: Fetch kubeconfig locally
+  when: k3s_fetch_kubeconfig | bool
+  block:
+    - name: Ensure local kubeconfig directory exists
+      ansible.builtin.file:
+        path: "{{ k3s_kubeconfig_local_path }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Read remote kubeconfig
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: k3s_kubeconfig_slurp
+      become: "{{ k3s_become }}"
+
+    - name: Write kubeconfig with reachable API server
+      ansible.builtin.copy:
+        dest: "{{ k3s_kubeconfig_local_path }}/{{ k3s_cluster_group }}.yaml"
+        mode: "0600"
+        content: >-
+          {{
+            k3s_kubeconfig_slurp.content | b64decode
+            | regex_replace('127\\.0\\.0\\.1', k3s_api_host)
+            | regex_replace('localhost', k3s_api_host)
+          }}
+      delegate_to: localhost
+      become: false

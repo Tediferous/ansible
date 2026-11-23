@@ -1,0 +1,11 @@
+---
+- name: Read join token from init server
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_slurp
+  delegate_to: "{{ groups[k3s_cluster_group ~ '_servers'][0] }}"
+  become: "{{ k3s_become }}"
+
+- name: Set join token
+  ansible.builtin.set_fact:
+    k3s_token: "{{ k3s_token_slurp.content | b64decode | trim }}"
