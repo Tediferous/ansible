@@ -18,6 +18,9 @@
     cache_valid_time: 3600
   become: "{{ k3s_become }}"
 
+- name: Ensure memory cgroups for k3s
+  ansible.builtin.include_tasks: cgroups.yml
+
 - name: Install k3s server (init)
   ansible.builtin.include_tasks: server_init.yml
   when:
