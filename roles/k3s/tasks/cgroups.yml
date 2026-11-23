@@ -1,5 +1,7 @@
 ---
 # Raspberry Pi / low-power boards need memory cgroups for k3s.
+# cmdline.txt must be a single line with no trailing newline — the Pi bootloader
+# ignores parameters after a line break.
 - name: Locate kernel cmdline
   ansible.builtin.stat:
     path: "{{ item }}"
@@ -21,20 +23,18 @@
       register: k3s_cmdline_slurp
       become: "{{ k3s_become }}"
 
+    - name: Build desired cmdline (single line, no trailing newline)
+      ansible.builtin.set_fact:
+        k3s_cmdline_current: "{{ k3s_cmdline_slurp.content | b64decode }}"
+        k3s_cmdline_desired: "{{ ((k3s_cmdline_slurp.content | b64decode | regex_replace('\\s+', ' ') | trim) ~ ' ' ~ (k3s_cgroup_cmdline_params | reject('in', k3s_cmdline_slurp.content | b64decode) | list | join(' '))) | trim }}"
+
     - name: Ensure memory cgroup kernel params
       ansible.builtin.copy:
         dest: "{{ k3s_cmdline_path }}"
-        content: >-
-          {{
-            (
-              (k3s_cmdline_slurp.content | b64decode | trim)
-              ~ ' '
-              ~ (k3s_cgroup_cmdline_params | reject('in', k3s_cmdline_slurp.content | b64decode) | list | join(' '))
-            ) | trim
-          }}{{ '\n' }}
+        content: "{{ k3s_cmdline_desired }}"
         mode: preserve
-        backup: true
-      when: k3s_cgroup_cmdline_params | reject('in', k3s_cmdline_slurp.content | b64decode) | list | length > 0
+        # /boot/firmware is usually vfat; Ansible backup names with @/~ fail there
+        backup: false
       become: "{{ k3s_become }}"
       register: k3s_cmdline_updated
 
@@ -42,5 +42,5 @@
       ansible.builtin.reboot:
         msg: Rebooting to enable memory cgroups for k3s
         reboot_timeout: 300
-      when: k3s_cmdline_updated is changed
+      when: k3s_cmdline_updated.changed | default(false)
       become: "{{ k3s_become }}"
