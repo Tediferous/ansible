@@ -1,0 +1,46 @@
+---
+# Raspberry Pi / low-power boards need memory cgroups for k3s.
+- name: Locate kernel cmdline
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /boot/firmware/cmdline.txt
+    - /boot/cmdline.txt
+  register: k3s_cmdline_candidates
+
+- name: Select cmdline path
+  ansible.builtin.set_fact:
+    k3s_cmdline_path: "{{ (k3s_cmdline_candidates.results | selectattr('stat.exists') | map(attribute='item') | list)[0] | default('') }}"
+
+- name: Configure memory cgroups when cmdline exists
+  when: k3s_cmdline_path | length > 0
+  block:
+    - name: Read kernel cmdline
+      ansible.builtin.slurp:
+        src: "{{ k3s_cmdline_path }}"
+      register: k3s_cmdline_slurp
+      become: "{{ k3s_become }}"
+
+    - name: Ensure memory cgroup kernel params
+      ansible.builtin.copy:
+        dest: "{{ k3s_cmdline_path }}"
+        content: >-
+          {{
+            (
+              (k3s_cmdline_slurp.content | b64decode | trim)
+              ~ ' '
+              ~ (k3s_cgroup_cmdline_params | reject('in', k3s_cmdline_slurp.content | b64decode) | list | join(' '))
+            ) | trim
+          }}{{ '\n' }}
+        mode: preserve
+        backup: true
+      when: k3s_cgroup_cmdline_params | reject('in', k3s_cmdline_slurp.content | b64decode) | list | length > 0
+      become: "{{ k3s_become }}"
+      register: k3s_cmdline_updated
+
+    - name: Reboot for cgroup cmdline changes
+      ansible.builtin.reboot:
+        msg: Rebooting to enable memory cgroups for k3s
+        reboot_timeout: 300
+      when: k3s_cmdline_updated is changed
+      become: "{{ k3s_become }}"
